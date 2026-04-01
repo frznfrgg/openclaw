@@ -13,6 +13,11 @@ curl -fsSL https://raw.githubusercontent.com/frznfrgg/openclaw/vk-fork-installer
 What it does:
 
 - installs `git`, `curl`, and `ca-certificates` when missing
+- installs the same base Linux build tools that upstream bootstraps:
+  - Debian/Ubuntu: `build-essential`, `python3`, `make`, `g++`, `cmake`
+  - Arch: `base-devel`, `python`, `make`, `cmake`, `gcc`
+  - Fedora/RHEL: `gcc`, `gcc-c++`, `make`, `cmake`, `python3`
+  - Alpine: `build-base`, `python3`, `cmake`
 - installs Node.js 24 when the host does not already have Node.js `22.12+`
 - installs `pnpm`
 - clones `https://github.com/frznfrgg/openclaw.git`

@@ -115,12 +115,20 @@ detect_pkg_manager() {
     printf 'apt'
     return
   fi
+  if command_exists pacman; then
+    printf 'pacman'
+    return
+  fi
   if command_exists dnf; then
     printf 'dnf'
     return
   fi
   if command_exists yum; then
     printf 'yum'
+    return
+  fi
+  if command_exists apk; then
+    printf 'apk'
     return
   fi
   printf 'unknown'
@@ -142,14 +150,47 @@ ensure_core_packages() {
       run_as_root apt-get update
       run_as_root apt-get install -y git curl ca-certificates
       ;;
+    pacman)
+      run_as_root pacman -Sy --noconfirm git curl ca-certificates
+      ;;
     dnf)
       run_as_root dnf install -y git curl ca-certificates
       ;;
     yum)
       run_as_root yum install -y git curl ca-certificates
       ;;
+    apk)
+      run_as_root apk add --no-cache git curl ca-certificates
+      ;;
     *)
       die "Missing required tools (${missing[*]}). Install them manually and rerun."
+      ;;
+  esac
+}
+
+ensure_build_tools() {
+  local pkg_manager
+  pkg_manager="$(detect_pkg_manager)"
+  case "$pkg_manager" in
+    apt)
+      run_as_root apt-get update
+      run_as_root apt-get install -y build-essential python3 make g++ cmake
+      ;;
+    pacman)
+      run_as_root pacman -Sy --noconfirm base-devel python make cmake gcc
+      ;;
+    dnf)
+      run_as_root dnf install -y gcc gcc-c++ make cmake python3
+      ;;
+    yum)
+      run_as_root yum install -y gcc gcc-c++ make cmake python3
+      ;;
+    apk)
+      run_as_root apk add --no-cache build-base python3 cmake
+      ;;
+    *)
+      warn "Could not detect package manager for auto-installing build tools"
+      return 0
       ;;
   esac
 }
@@ -324,6 +365,7 @@ done
 [ -n "$UPDATE_LINK_NAME" ] || die "Update link name must not be empty"
 
 ensure_core_packages
+ensure_build_tools
 install_node_if_needed
 ensure_pnpm
 clone_or_refresh_checkout
