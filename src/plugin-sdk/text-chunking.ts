@@ -1,3 +1,4 @@
+export { chunkByParagraph } from "../auto-reply/chunk.js";
 import { chunkTextByBreakResolver } from "../shared/text-chunking.js";
 
 /** Chunk outbound text while preferring newline boundaries over spaces. */
