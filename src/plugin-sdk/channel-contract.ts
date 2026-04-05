@@ -24,6 +24,7 @@ export type {
   ChannelToolSend,
 } from "../channels/plugins/types.js";
 export type { ChannelLegacyStateMigrationPlan } from "../channels/plugins/types.core.js";
+export type { ChannelMessagingAdapter } from "../channels/plugins/types.core.js";
 
 export type {
   ChannelDirectoryAdapter,
