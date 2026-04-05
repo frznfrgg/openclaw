@@ -242,6 +242,7 @@ WhatsApp runs through the gateway's web channel (Baileys Web). It starts automat
 - `communityId`: required positive VK community id as a decimal string.
 - Choose exactly one credential source: `communityAccessToken`, `tokenFile`, or `VK_COMMUNITY_ACCESS_TOKEN` via `--use-env`.
 - `dmPolicy` defaults to `pairing`.
+- For configured VK channels, `groupPolicy` defaults to `open` when unset. Set it explicitly only if you want `allowlist` or `disabled`.
 - Group chats are mention-gated first, then filtered by `groups`, `groupPolicy`, and `groupAllowFrom`.
 - Explicit outbound targets use `vk:user:<user_id>` or `vk:chat:<peer_id>`.
 

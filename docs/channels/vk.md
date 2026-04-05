@@ -16,6 +16,9 @@ VK support uses the community-scoped **Bots Long Poll API**. Setup validates the
   <Card title="Pairing" icon="link" href="/channels/pairing">
     Default VK DM policy is pairing.
   </Card>
+  <Card title="Groups" icon="users" href="/gateway/configuration-reference#vk">
+    Configured VK channels default group routing to open.
+  </Card>
   <Card title="Gateway configuration" icon="settings" href="/gateway/configuration">
     Full config patterns and field reference.
   </Card>
@@ -75,7 +78,8 @@ openclaw pairing approve vk <CODE>
 
 - One OpenClaw instance maps to one VK community.
 - Direct chats route on all incoming user messages, then the configured `dmPolicy` decides whether they are admitted.
-- Group chats route only when VK delivers a bot-relevant `message_new` under the default **Only mentions** access level. OpenClaw then applies `channels.vk.groups`, `groupPolicy`, and `groupAllowFrom`.
+- Configured VK channels default `groupPolicy` to `open`. Set `channels.vk.groupPolicy` explicitly only when you want `allowlist` or `disabled`.
+- Group chats route only when VK delivers a bot-relevant `message_new` under the default **Only mentions** access level. OpenClaw then applies mention gating plus `channels.vk.groups`, `groupPolicy`, and `groupAllowFrom`.
 - Session identity keys on VK `peer_id` boundaries:
   - direct chat: user `peer_id`
   - group chat: conversation `peer_id`
@@ -116,6 +120,7 @@ openclaw message send --to vk:chat:2000000001 "hello group"
         id: "VK_COMMUNITY_ACCESS_TOKEN",
       },
       dmPolicy: "pairing",
+      // Set groupPolicy only when you want allowlist or disabled behavior.
       groupPolicy: "allowlist",
       groups: {
         "2000000001": { enabled: true },
@@ -131,6 +136,7 @@ openclaw message send --to vk:chat:2000000001 "hello group"
 
 - Community messages must be enabled for normal DM replies and media upload flows.
 - Users must message the community first before the bot can DM them.
+- Configured VK channels default `groupPolicy` to `open`; explicit `allowlist` and `disabled` still work normally.
 - `channels.vk.groups` is config-only in v1; there is no live VK group picker yet.
 
 ## Related docs
