@@ -127,6 +127,12 @@ const vkMessageActions: ChannelMessageActionAdapter = {
   }),
 };
 
+const VK_MESSAGE_TOOL_HINTS = [
+  'Use explicit VK targets only: "vk:user:<user_id>" for DMs and "vk:chat:<peer_id>" for group chats.',
+  "VK can send files and images with the normal message send action. Provide the caption/message plus media, path, or filePath.",
+  "For local VK file sends, use an absolute path under the OpenClaw workspace or another allowed local workspace directory. Do not use bare relative paths such as saved_images/example.jpg.",
+];
+
 const vkTargetResolver: NonNullable<ChannelMessagingAdapter["targetResolver"]> = {
   looksLikeId: (raw: string, normalized?: string) =>
     Boolean(parseVkExplicitTarget(raw) ?? (normalized ? parseVkExplicitTarget(normalized) : null)),
@@ -363,6 +369,9 @@ export const vkPlugin: ChannelPlugin<InspectedVkAccount, VkProbe> = {
       ...vkTargetResolver,
       hint: "<vk:user:{user_id}|vk:chat:{peer_id}>",
     },
+  },
+  agentPrompt: {
+    messageToolHints: () => [...VK_MESSAGE_TOOL_HINTS],
   },
 };
 

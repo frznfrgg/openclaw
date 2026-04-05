@@ -29,6 +29,17 @@ describe("VK plugin entrypoints", () => {
   it("wires same-chat approval auth through the live VK plugin", () => {
     expect(vkPlugin.auth).toBe(vkApprovalAuth);
   });
+
+  it("advertises VK-specific message tool hints for explicit targets and local media", () => {
+    const hints = vkPlugin.agentPrompt?.messageToolHints?.({ cfg: {} });
+    expect(hints).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("vk:user:<user_id>"),
+        expect.stringContaining("vk:chat:<peer_id>"),
+        expect.stringContaining("absolute path"),
+      ]),
+    );
+  });
 });
 
 describe("VK single-account setup/config contract", () => {
