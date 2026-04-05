@@ -11,8 +11,8 @@ import {
   shouldComputeCommandAuthorized,
 } from "openclaw/plugin-sdk/command-detection";
 import {
-  resolveAllowlistProviderRuntimeGroupPolicy,
   resolveDefaultGroupPolicy,
+  resolveOpenProviderRuntimeGroupPolicy,
 } from "openclaw/plugin-sdk/config-runtime";
 import { dispatchInboundReplyWithBase } from "openclaw/plugin-sdk/inbound-reply-dispatch";
 import { materializeVkInboundMedia } from "./inbound-media.js";
@@ -142,7 +142,7 @@ function resolveVkEffectiveGroupPolicy(params: {
   cfg: ChannelGatewayContext<InspectedVkAccount>["cfg"];
   account: ResolvedVkAccount;
 }) {
-  return resolveAllowlistProviderRuntimeGroupPolicy({
+  return resolveOpenProviderRuntimeGroupPolicy({
     providerConfigPresent: params.cfg.channels?.vk !== undefined,
     groupPolicy: params.account.config.groupPolicy,
     defaultGroupPolicy: resolveDefaultGroupPolicy(params.cfg),

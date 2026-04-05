@@ -178,6 +178,66 @@ describe("routeVkInboundEvent group routing", () => {
     });
   });
 
+  it("treats unset VK groupPolicy as open for configured VK accounts", async () => {
+    mocks.dispatchInboundReplyWithBase.mockImplementation(async (params) => {
+      await params.deliver({ text: "group reply" });
+    });
+
+    await routeVkInboundEvent({
+      ctx: {
+        cfg: {
+          channels: {
+            vk: {
+              communityId: "123",
+              communityAccessToken: "vk-token",
+            },
+          },
+        },
+        accountId: "default",
+        runtime: { error: vi.fn() } as never,
+        log: { debug: vi.fn(), error: vi.fn() } as never,
+      },
+      account: {
+        ...baseAccount,
+        config: {
+          ...baseAccount.config,
+          groupPolicy: undefined,
+        },
+      },
+      event: {
+        eventId: "evt-group-default-1",
+        peerId: "2000000001",
+        senderId: "77",
+        messageId: "15",
+        text: "[club123|tst-openclaw] hello group",
+        attachments: [],
+        timestamp: 1_700_000_000_000,
+        chatType: "group",
+      },
+      statusSink: vi.fn(),
+    });
+
+    expect(mocks.dispatchInboundReplyWithBase).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchInboundReplyWithBase.mock.calls[0][0].ctxPayload).toMatchObject({
+      RawBody: "hello group",
+      To: "vk:chat:2000000001",
+      WasMentioned: true,
+    });
+    expect(mocks.sendVkText).toHaveBeenCalledWith({
+      cfg: {
+        channels: {
+          vk: {
+            communityId: "123",
+            communityAccessToken: "vk-token",
+          },
+        },
+      },
+      accountId: "default",
+      to: "vk:chat:2000000001",
+      text: "group reply",
+    });
+  });
+
   it("blocks group chats not admitted by channels.vk.groups", async () => {
     await routeVkInboundEvent({
       ctx: {

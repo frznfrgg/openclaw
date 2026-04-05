@@ -14,8 +14,8 @@ import {
 } from "openclaw/plugin-sdk/channel-status";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import {
-  resolveAllowlistProviderRuntimeGroupPolicy,
   resolveDefaultGroupPolicy,
+  resolveOpenProviderRuntimeGroupPolicy,
 } from "openclaw/plugin-sdk/config-runtime";
 import { buildChannelOutboundSessionRoute } from "openclaw/plugin-sdk/core";
 import { chunkByParagraph } from "openclaw/plugin-sdk/text-chunking";
@@ -56,7 +56,7 @@ function resolveVkDmPolicy(
 }
 
 function resolveVkGroupPolicy(params: { cfg: OpenClawConfig; account: InspectedVkAccount }) {
-  return resolveAllowlistProviderRuntimeGroupPolicy({
+  return resolveOpenProviderRuntimeGroupPolicy({
     providerConfigPresent: params.cfg.channels?.vk !== undefined,
     groupPolicy: params.account.config.groupPolicy,
     defaultGroupPolicy: resolveDefaultGroupPolicy(params.cfg),
