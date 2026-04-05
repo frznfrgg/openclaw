@@ -1,6 +1,9 @@
-import { defineSetupPluginEntry } from "openclaw/plugin-sdk/channel-core";
-import { vkSetupPlugin } from "./src/channel.js";
+import { defineBundledChannelSetupEntry } from "openclaw/plugin-sdk/channel-entry-contract";
 
-export { vkSetupPlugin } from "./src/channel.js";
-
-export default defineSetupPluginEntry(vkSetupPlugin);
+export default defineBundledChannelSetupEntry({
+  importMetaUrl: import.meta.url,
+  plugin: {
+    specifier: "./api.js",
+    exportName: "vkSetupPlugin",
+  },
+});

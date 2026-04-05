@@ -16,3 +16,4 @@ export {
   collectStatusIssuesFromLastError,
   createDefaultChannelRuntimeState,
 } from "openclaw/plugin-sdk/channel-status";
+export { setVkRuntime } from "./src/runtime.js";

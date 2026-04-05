@@ -8,13 +8,21 @@ const DEFAULT_ACCOUNT_ID = "default";
 
 describe("VK plugin entrypoints", () => {
   it("publishes the bundled VK channel plugin entry", () => {
+    const loadedPlugin = pluginEntry.loadChannelPlugin();
+    expect(pluginEntry.kind).toBe("bundled-channel-entry");
     expect(pluginEntry.id).toBe("vk");
     expect(pluginEntry.name).toBe("VK");
     expect(pluginEntry.description).toBe("VK channel plugin");
+    expect(loadedPlugin.id).toBe(vkPlugin.id);
+    expect(loadedPlugin.auth).toBeDefined();
+    expect(loadedPlugin.auth?.authorizeActorAction).toBeTypeOf("function");
   });
 
   it("publishes the VK setup entry", () => {
-    expect(setupEntry.plugin).toBe(vkSetupPlugin);
+    const loadedSetupPlugin = setupEntry.loadSetupPlugin();
+    expect(setupEntry.kind).toBe("bundled-channel-setup-entry");
+    expect(loadedSetupPlugin.id).toBe(vkSetupPlugin.id);
+    expect(loadedSetupPlugin.setup?.resolveAccountId).toBeTypeOf("function");
     expect(vkSetupPlugin.id).toBe("vk");
   });
 

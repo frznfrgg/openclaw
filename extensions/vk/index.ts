@@ -1,14 +1,16 @@
-import { defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
-import { vkPlugin } from "./src/channel.js";
-import { setVkRuntime } from "./src/runtime.js";
+import { defineBundledChannelEntry } from "openclaw/plugin-sdk/channel-entry-contract";
 
-export { vkPlugin } from "./src/channel.js";
-export { setVkRuntime } from "./src/runtime.js";
-
-export default defineChannelPluginEntry({
+export default defineBundledChannelEntry({
   id: "vk",
   name: "VK",
   description: "VK channel plugin",
-  plugin: vkPlugin,
-  setRuntime: setVkRuntime,
+  importMetaUrl: import.meta.url,
+  plugin: {
+    specifier: "./api.js",
+    exportName: "vkPlugin",
+  },
+  runtime: {
+    specifier: "./runtime-api.js",
+    exportName: "setVkRuntime",
+  },
 });
