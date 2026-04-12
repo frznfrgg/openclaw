@@ -36,6 +36,64 @@ export type {
 
 type ChannelSetupWizardPlugin = ChannelSetupPlugin;
 
+function parseDeferredBoolean(value: string): boolean | undefined {
+  const normalized = normalizeOptionalString(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  return undefined;
+}
+
+function coerceDeferredSetupInput(
+  values: Partial<Record<keyof ChannelSetupInput, string>>,
+): ChannelSetupInput {
+  const input: ChannelSetupInput = {};
+  for (const [rawKey, rawValue] of Object.entries(values)) {
+    if (typeof rawValue !== "string") {
+      continue;
+    }
+    const key = rawKey as keyof ChannelSetupInput;
+    switch (key) {
+      case "service":
+        if (rawValue === "auto" || rawValue === "imessage" || rawValue === "sms") {
+          input.service = rawValue;
+        }
+        break;
+      case "useEnv":
+      case "dangerouslyAllowPrivateNetwork":
+      case "allowPrivateNetwork":
+      case "autoDiscoverChannels": {
+        const parsed = parseDeferredBoolean(rawValue);
+        if (parsed !== undefined) {
+          input[key] = parsed;
+        }
+        break;
+      }
+      case "initialSyncLimit": {
+        const parsed = Number(rawValue);
+        if (Number.isFinite(parsed)) {
+          input.initialSyncLimit = parsed;
+        }
+        break;
+      }
+      case "groupChannels":
+      case "dmAllowlist":
+        input[key] = splitSetupEntries(rawValue);
+        break;
+      default:
+        (input as Record<string, unknown>)[key] = rawValue;
+        break;
+    }
+  }
+  return input;
+}
+
 function resolveSetupCandidate(params: {
   plugin: ChannelSetupWizardPlugin;
   cfg: OpenClawConfig;
@@ -546,7 +604,7 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
       }
 
       if (wizard.deferApplyUntilValidated) {
-        const deferredInput = {
+        const deferredInput = coerceDeferredSetupInput({
           ...credentialValues,
           ...(Object.fromEntries(
             wizard.textInputs?.flatMap((textInput) => {
@@ -554,7 +612,7 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
               return typeof value === "string" ? [[textInput.inputKey, value]] : [];
             }) ?? [],
           ) as Partial<Record<keyof ChannelSetupInput, string>>),
-        };
+        });
         const candidate = resolveSetupCandidate({
           plugin,
           cfg: next,

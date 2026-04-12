@@ -188,4 +188,69 @@ describe("buildChannelSetupWizardAdapterFromSetupWizard", () => {
       }),
     ).rejects.toThrow("VK long poll probe failed");
   });
+
+  it("preserves narrowed service values in deferred setup input", async () => {
+    const validateCompleteInput = vi.fn(({ input }) => {
+      expect(input.service).toBe("auto");
+      return null;
+    });
+    const plugin = {
+      ...createChannelTestPluginBase({
+        id: "bluebubbles",
+        label: "BlueBubbles",
+        docsPath: "/channels/bluebubbles",
+        config: {
+          listAccountIds: () => [],
+          resolveAccount: () => ({}),
+        },
+      }),
+      setup: {
+        applyAccountConfig: ({ cfg, input }) => ({
+          ...cfg,
+          channels: {
+            ...cfg.channels,
+            bluebubbles: {
+              enabled: true,
+              ...(input.service ? { service: input.service } : {}),
+            },
+          },
+        }),
+        validateCompleteInput,
+      },
+    } as ChannelPlugin;
+    const adapter = buildChannelSetupWizardAdapterFromSetupWizard({
+      plugin,
+      wizard: {
+        channel: "bluebubbles",
+        deferApplyUntilValidated: true,
+        status: {
+          configuredLabel: "Configured",
+          unconfiguredLabel: "Not configured",
+          resolveConfigured: () => false,
+        },
+        credentials: [],
+        textInputs: [
+          {
+            inputKey: "service",
+            message: "Service",
+          },
+        ],
+      },
+    });
+
+    const result = await adapter.configure({
+      cfg: baseCfg,
+      runtime: {} as never,
+      prompter: createPrompter(["auto"]),
+      accountOverrides: {},
+      shouldPromptAccountIds: false,
+      forceAllowFrom: false,
+    });
+
+    expect(validateCompleteInput).toHaveBeenCalledTimes(1);
+    expect(result.cfg.channels?.bluebubbles).toMatchObject({
+      enabled: true,
+      service: "auto",
+    });
+  });
 });
