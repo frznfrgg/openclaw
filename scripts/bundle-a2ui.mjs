@@ -22,6 +22,8 @@ const ignoredBundleHashInputPrefixes = ["vendor/a2ui/renderers/lit/dist"];
 const relativeInputPaths = inputPaths.map((inputPath) =>
   normalizePath(path.relative(rootDir, inputPath)),
 );
+const stubBundleText = "/* A2UI bundle unavailable in this build */\n";
+const stubBundleHash = "stub\n";
 
 function fail(message) {
   console.error(message);
@@ -65,6 +67,23 @@ export function getLocalRolldownCliCandidates(repoRoot = rootDir) {
       "cli.mjs",
     ),
   ];
+}
+
+export async function shouldStubMissingA2uiBundle(params = {}) {
+  const env = params.env ?? process.env;
+  if (env.OPENCLAW_SPARSE_PROFILE || env.OPENCLAW_A2UI_SKIP_MISSING === "1") {
+    return true;
+  }
+  const repoRoot = params.repoRoot ?? rootDir;
+  return !(await pathExists(path.join(repoRoot, ".git")));
+}
+
+export async function writeStubA2uiBundle(params = {}) {
+  const bundlePath = params.outputFile ?? outputFile;
+  const bundleHashPath = params.hashFile ?? hashFile;
+  await fs.mkdir(path.dirname(bundlePath), { recursive: true });
+  await fs.writeFile(bundlePath, stubBundleText, "utf8");
+  await fs.writeFile(bundleHashPath, stubBundleHash, "utf8");
 }
 
 async function walkFiles(entryPath, files) {
@@ -153,10 +172,15 @@ async function main() {
       console.log("A2UI sources missing; keeping prebuilt bundle.");
       return;
     }
-    if (process.env.OPENCLAW_SPARSE_PROFILE || process.env.OPENCLAW_A2UI_SKIP_MISSING === "1") {
+    if (await shouldStubMissingA2uiBundle()) {
+      const reason =
+        process.env.OPENCLAW_SPARSE_PROFILE || process.env.OPENCLAW_A2UI_SKIP_MISSING === "1"
+          ? "OPENCLAW_A2UI_SKIP_MISSING=1 or OPENCLAW_SPARSE_PROFILE is set"
+          : "this build is running from a source archive without Git metadata";
       console.error(
-        "A2UI sources missing; skipping bundle because OPENCLAW_A2UI_SKIP_MISSING=1 or OPENCLAW_SPARSE_PROFILE is set.",
+        `A2UI sources missing; writing stub bundle because ${reason}.`,
       );
+      await writeStubA2uiBundle();
       return;
     }
     fail(`A2UI sources missing and no prebuilt bundle found at: ${outputFile}`);

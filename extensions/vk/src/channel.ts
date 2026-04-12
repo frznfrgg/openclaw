@@ -1,6 +1,5 @@
 import { buildAccountScopedAllowlistConfigEditor } from "openclaw/plugin-sdk/allowlist-config-edit";
 import { createScopedDmSecurityResolver } from "openclaw/plugin-sdk/channel-config-helpers";
-import type { ChannelMessagingAdapter } from "openclaw/plugin-sdk/channel-contract";
 import type { ChannelMessageActionAdapter } from "openclaw/plugin-sdk/channel-contract";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
 import { createAccountStatusSink } from "openclaw/plugin-sdk/channel-lifecycle";
@@ -17,9 +16,12 @@ import {
   resolveDefaultGroupPolicy,
   resolveOpenProviderRuntimeGroupPolicy,
 } from "openclaw/plugin-sdk/config-runtime";
-import { buildChannelOutboundSessionRoute } from "openclaw/plugin-sdk/core";
-import { chunkByParagraph } from "openclaw/plugin-sdk/text-chunking";
-import { buildPassiveProbedChannelStatusSummary } from "../../shared/channel-status-summary.js";
+import {
+  buildChannelOutboundSessionRoute,
+  type ChannelMessagingAdapter,
+} from "openclaw/plugin-sdk/core";
+import { buildPassiveProbedChannelStatusSummary } from "openclaw/plugin-sdk/extension-shared";
+import { chunkText } from "openclaw/plugin-sdk/reply-chunking";
 import { vkApprovalCapability } from "./approval-native.js";
 import { normalizeVkLongPollUpdate } from "./inbound-normalize.js";
 import { routeVkInboundEvent } from "./inbound-routing.js";
@@ -315,7 +317,7 @@ export const vkPlugin: ChannelPlugin<InspectedVkAccount, VkProbe> = {
   },
   outbound: {
     deliveryMode: "direct",
-    chunker: chunkByParagraph,
+    chunker: chunkText,
     chunkerMode: "text",
     textChunkLimit: 9000,
     normalizePayload: ({ payload }) => normalizeVkOutboundPayload(payload),
