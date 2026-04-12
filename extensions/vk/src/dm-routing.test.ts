@@ -294,6 +294,59 @@ describe("routeVkInboundEvent", () => {
     expect(mocks.sendVkText).not.toHaveBeenCalled();
   });
 
+  it("lets defaultTo approvers answer pending approvals without DM pairing", async () => {
+    rememberVkPendingApproval({
+      accountId: "default",
+      senderId: "77",
+      approvalId: "3c274b25-d99d-46fb-9c72-6d2d3124ca33",
+    });
+
+    await routeVkInboundEvent({
+      ctx: {
+        cfg: {
+          channels: {
+            vk: {
+              communityId: "123",
+              communityAccessToken: "vk-token",
+              dmPolicy: "pairing",
+              defaultTo: "vk:user:77",
+            },
+          },
+        },
+        accountId: "default",
+        runtime: { error: vi.fn() } as never,
+        log: { debug: vi.fn(), error: vi.fn() } as never,
+      },
+      account: {
+        ...baseAccount,
+        config: {
+          ...baseAccount.config,
+          dmPolicy: "pairing",
+          defaultTo: "vk:user:77",
+        },
+      },
+      event: {
+        eventId: "evt-approval-defaultto-1",
+        peerId: "77",
+        senderId: "77",
+        messageId: "13",
+        text: "approve once",
+        attachments: [],
+        timestamp: 1_700_000_000_000,
+        chatType: "direct",
+      },
+      statusSink: vi.fn(),
+    });
+
+    expect(mocks.upsertPairingRequest).not.toHaveBeenCalled();
+    expect(mocks.dispatchInboundReplyWithBase).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchInboundReplyWithBase.mock.calls[0][0].ctxPayload).toMatchObject({
+      RawBody: "approve once",
+      CommandBody: "/approve 3c274b25-d99d-46fb-9c72-6d2d3124ca33 allow-once",
+      CommandAuthorized: true,
+    });
+  });
+
   it("asks for an approval code instead of misrouting ambiguous approval replies", async () => {
     rememberVkPendingApproval({
       accountId: "default",

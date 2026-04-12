@@ -15,6 +15,7 @@ import {
   resolveOpenProviderRuntimeGroupPolicy,
 } from "openclaw/plugin-sdk/config-runtime";
 import { dispatchInboundReplyWithBase } from "openclaw/plugin-sdk/inbound-reply-dispatch";
+import { isVkApprovalApprover } from "./approval-auth.js";
 import { resolveVkApprovalProxyReply } from "./approval-native.js";
 import { materializeVkInboundMedia } from "./inbound-media.js";
 import type { VkInboundEvent } from "./inbound-normalize.js";
@@ -383,6 +384,33 @@ export async function routeVkInboundEvent(params: {
   }
 
   const dmPolicy = account.config.dmPolicy ?? "pairing";
+  const approvalProxy =
+    hasControl || rawBody
+      ? resolveVkApprovalProxyReply({
+          accountId: account.accountId,
+          senderId: event.senderId,
+          rawBody,
+        })
+      : { kind: "miss" as const };
+  const approvalSenderAuthorized =
+    approvalProxy.kind !== "miss" &&
+    isVkApprovalApprover({
+      cfg: ctx.cfg,
+      accountId: account.accountId,
+      senderId: event.senderId,
+    });
+
+  if (approvalSenderAuthorized) {
+    await dispatchVkInboundConversation({
+      ctx,
+      account,
+      event,
+      commandAuthorized: true,
+      statusSink,
+    });
+    return;
+  }
+
   const storeAllowFrom = await readStoreAllowFromForDmPolicy({
     provider: VK_CHANNEL,
     accountId: account.accountId,

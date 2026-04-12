@@ -41,6 +41,14 @@ const baseAccount: ResolvedVkAccount = {
   },
 };
 
+function resolveRequestUrl(input: RequestInfo | URL): string {
+  return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+}
+
+function resolveRequestBodyParams(init?: RequestInit): URLSearchParams {
+  return init?.body instanceof URLSearchParams ? init.body : new URLSearchParams();
+}
+
 describe("VK media helpers", () => {
   beforeEach(() => {
     outboundMediaMocks.loadOutboundMediaFromUrl.mockReset();
@@ -56,7 +64,7 @@ describe("VK media helpers", () => {
     const fetcher = vi
       .fn()
       .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
-        const body = new URLSearchParams(String(init?.body));
+        const body = resolveRequestBodyParams(init);
         expect(body.get("group_id")).toBe("123");
         expect(body.get("peer_id")).toBe("597545525");
         return new Response(
@@ -65,7 +73,7 @@ describe("VK media helpers", () => {
         );
       })
       .mockImplementationOnce(async (input: RequestInfo | URL, init?: RequestInit) => {
-        expect(String(input)).toBe("https://upload.vk.test/photo");
+        expect(resolveRequestUrl(input)).toBe("https://upload.vk.test/photo");
         const form = init?.body as FormData;
         expect(form.get("photo")).toBeTruthy();
         return new Response(JSON.stringify({ server: 11, photo: "[{}]", hash: "hash-1" }), {
@@ -73,7 +81,7 @@ describe("VK media helpers", () => {
         });
       })
       .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
-        const body = new URLSearchParams(String(init?.body));
+        const body = resolveRequestBodyParams(init);
         expect(body.get("server")).toBe("11");
         expect(body.get("photo")).toBe("[{}]");
         expect(body.get("hash")).toBe("hash-1");
@@ -96,7 +104,7 @@ describe("VK media helpers", () => {
     expect(outboundMediaMocks.loadOutboundMediaFromUrl).toHaveBeenCalledWith(
       "file:///tmp/photo.png",
       {
-        maxBytes: 200 * 1024 * 1024,
+        maxBytes: 50 * 1024 * 1024,
         mediaLocalRoots: ["/tmp"],
       },
     );
@@ -112,7 +120,7 @@ describe("VK media helpers", () => {
     const fetcher = vi
       .fn()
       .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
-        const body = new URLSearchParams(String(init?.body));
+        const body = resolveRequestBodyParams(init);
         expect(body.get("type")).toBe("doc");
         expect(body.get("peer_id")).toBe("597545525");
         return new Response(
@@ -121,13 +129,13 @@ describe("VK media helpers", () => {
         );
       })
       .mockImplementationOnce(async (input: RequestInfo | URL, init?: RequestInit) => {
-        expect(String(input)).toBe("https://upload.vk.test/doc");
+        expect(resolveRequestUrl(input)).toBe("https://upload.vk.test/doc");
         const form = init?.body as FormData;
         expect(form.get("file")).toBeTruthy();
         return new Response(JSON.stringify({ file: "file-token-1" }), { status: 200 });
       })
       .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
-        const body = new URLSearchParams(String(init?.body));
+        const body = resolveRequestBodyParams(init);
         expect(body.get("file")).toBe("file-token-1");
         expect(body.get("title")).toBe("report");
         return new Response(JSON.stringify({ response: { doc: { id: 55, owner_id: -123 } } }), {
@@ -209,14 +217,28 @@ describe("VK media helpers", () => {
       }),
     ).resolves.toBe("doc-123_55");
 
-    const photoUploadBody = new URLSearchParams(
-      String((fetcher.mock.calls[0] as [RequestInfo | URL, RequestInit | undefined])[1]?.body),
+    const photoUploadBody = resolveRequestBodyParams(
+      (fetcher.mock.calls[0] as [RequestInfo | URL, RequestInit | undefined])[1],
     );
-    const docUploadBody = new URLSearchParams(
-      String((fetcher.mock.calls[3] as [RequestInfo | URL, RequestInit | undefined])[1]?.body),
+    const docUploadBody = resolveRequestBodyParams(
+      (fetcher.mock.calls[3] as [RequestInfo | URL, RequestInit | undefined])[1],
     );
     expect(photoUploadBody.get("peer_id")).toBe("597545525");
     expect(docUploadBody.get("peer_id")).toBe("597545525");
+    expect(outboundMediaMocks.loadOutboundMediaFromUrl.mock.calls[0]).toEqual([
+      "https://example.com/photo.jpg",
+      {
+        maxBytes: 50 * 1024 * 1024,
+        mediaLocalRoots: undefined,
+      },
+    ]);
+    expect(outboundMediaMocks.loadOutboundMediaFromUrl.mock.calls[1]).toEqual([
+      "https://example.com/report.pdf",
+      {
+        maxBytes: 200 * 1024 * 1024,
+        mediaLocalRoots: undefined,
+      },
+    ]);
   });
 
   it("drops unsupported-only outbound payloads and preserves text when supported media remain", () => {

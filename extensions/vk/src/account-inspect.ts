@@ -9,7 +9,7 @@ import {
 } from "./config-schema.js";
 import type { InspectedVkAccount, VkAccountConfig } from "./shared.js";
 import { normalizeVkTarget } from "./targets.js";
-import { resolveVkToken } from "./token.js";
+import { resolveVkCredentialSourceCount, resolveVkToken } from "./token.js";
 
 const VK_CHANNEL = "vk" as const;
 const VK_DEFAULT_ACCOUNT_ID = DEFAULT_ACCOUNT_ID;
@@ -77,7 +77,11 @@ export function inspectVkAccount(params: {
     cfg: params.cfg,
     config,
   });
-  const configured = Boolean(config.communityId && token.tokenSource !== "none");
+  const configured = Boolean(
+    config.communityId &&
+    resolveVkCredentialSourceCount(config) === 1 &&
+    token.tokenSource !== "none",
+  );
 
   return {
     accountId: VK_DEFAULT_ACCOUNT_ID,

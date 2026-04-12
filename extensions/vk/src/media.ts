@@ -229,6 +229,21 @@ async function loadVkOutboundMedia(params: {
   });
 }
 
+function resolveVkOutboundMediaMaxBytes(params: {
+  mediaUrl: string;
+  preferImageLimit?: boolean;
+}): number {
+  if (
+    params.preferImageLimit ||
+    isSupportedVkImage({
+      mediaUrl: params.mediaUrl,
+    })
+  ) {
+    return VK_IMAGE_MAX_BYTES;
+  }
+  return VK_DOCUMENT_MAX_BYTES;
+}
+
 async function uploadVkImageInternal(params: {
   account: ResolvedVkAccount;
   peerId: string;
@@ -243,7 +258,10 @@ async function uploadVkImageInternal(params: {
     params.loaded ??
     (await loadVkOutboundMedia({
       mediaUrl: params.mediaUrl,
-      maxBytes: VK_DOCUMENT_MAX_BYTES,
+      maxBytes: resolveVkOutboundMediaMaxBytes({
+        mediaUrl: params.mediaUrl,
+        preferImageLimit: true,
+      }),
       mediaLocalRoots: params.mediaLocalRoots,
     }));
 
@@ -461,7 +479,9 @@ export async function resolveVkAttachmentToken(params: {
 }): Promise<string> {
   const loaded = await loadVkOutboundMedia({
     mediaUrl: params.mediaUrl,
-    maxBytes: VK_DOCUMENT_MAX_BYTES,
+    maxBytes: resolveVkOutboundMediaMaxBytes({
+      mediaUrl: params.mediaUrl,
+    }),
     mediaLocalRoots: params.mediaLocalRoots,
   });
   if (

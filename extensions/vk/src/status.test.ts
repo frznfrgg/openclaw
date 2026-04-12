@@ -53,6 +53,32 @@ describe("VK status baseline", () => {
     expect(account.token).toBeUndefined();
   });
 
+  it("treats multiple credential sources as unconfigured", async () => {
+    const cfg = {
+      channels: {
+        vk: {
+          enabled: true,
+          communityId: "123",
+          communityAccessToken: "vk-token",
+          tokenFile: "/tmp/vk.token",
+        },
+      },
+    };
+
+    const account = inspectVkAccount({ cfg });
+    const snapshot = await vkPlugin.status?.buildAccountSnapshot?.({
+      account,
+      cfg,
+    });
+
+    expect(account.configured).toBe(false);
+    expect(snapshot).toMatchObject({
+      accountId: "default",
+      configured: false,
+      tokenSource: "tokenFile",
+    });
+  });
+
   it("caches probe results from live status probes", async () => {
     vi.stubGlobal(
       "fetch",
