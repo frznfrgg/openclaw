@@ -12,6 +12,7 @@ const extensionRoutedChannelTestFileSet = new Set(extensionRoutedChannelTestFile
 
 export const channelTestRoots = [
   "src/channels",
+  bundledPluginRoot("vk"),
   bundledPluginRoot("discord"),
   bundledPluginRoot("slack"),
   bundledPluginRoot("signal"),

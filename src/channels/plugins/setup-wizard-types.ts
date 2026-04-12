@@ -81,6 +81,7 @@ export type ChannelSetupWizardCredential = {
   inputKey: keyof ChannelSetupInput;
   providerHint: string;
   credentialLabel: string;
+  secretInputMode?: "plaintext" | "ref";
   preferredEnvVar?: string;
   helpTitle?: string;
   helpLines?: string[];
@@ -253,6 +254,7 @@ export type ChannelSetupWizardFinalize = (params: {
 
 export type ChannelSetupWizard = {
   channel: string;
+  deferApplyUntilValidated?: boolean;
   status: ChannelSetupWizardStatus;
   introNote?: ChannelSetupWizardNote;
   envShortcut?: ChannelSetupWizardEnvShortcut;

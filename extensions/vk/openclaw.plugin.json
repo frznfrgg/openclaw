@@ -1,0 +1,12 @@
+{
+  "id": "vk",
+  "channels": ["vk"],
+  "channelEnvVars": {
+    "vk": ["VK_COMMUNITY_ACCESS_TOKEN"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

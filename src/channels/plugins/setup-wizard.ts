@@ -36,6 +36,75 @@ export type {
 
 type ChannelSetupWizardPlugin = ChannelSetupPlugin;
 
+function resolveSetupCandidate(params: {
+  plugin: ChannelSetupWizardPlugin;
+  cfg: OpenClawConfig;
+  accountId: string;
+  input: ChannelSetupInput;
+}) {
+  const setup = params.plugin.setup;
+  if (!setup?.applyAccountConfig) {
+    throw new Error(`${params.plugin.id} does not support setup`);
+  }
+  const resolvedAccountId =
+    setup.resolveAccountId?.({
+      cfg: params.cfg,
+      accountId: params.accountId,
+      input: params.input,
+    }) ?? params.accountId;
+  let next = setup.applyAccountConfig({
+    cfg: params.cfg,
+    accountId: resolvedAccountId,
+    input: params.input,
+  });
+  if (params.input.name?.trim() && setup.applyAccountName) {
+    next = setup.applyAccountName({
+      cfg: next,
+      accountId: resolvedAccountId,
+      name: params.input.name,
+    });
+  }
+  return {
+    cfg: next,
+    accountId: resolvedAccountId,
+  };
+}
+
+async function validateSetupCandidate(params: {
+  plugin: ChannelSetupWizardPlugin;
+  cfg: OpenClawConfig;
+  candidateCfg: OpenClawConfig;
+  accountId: string;
+  input: ChannelSetupInput;
+}) {
+  const setup = params.plugin.setup;
+  const validationError = setup?.validateInput?.({
+    cfg: params.cfg,
+    accountId: params.accountId,
+    input: params.input,
+  });
+  if (validationError) {
+    return validationError;
+  }
+  const completeValidationError = setup?.validateCompleteInput?.({
+    cfg: params.cfg,
+    candidateCfg: params.candidateCfg,
+    accountId: params.accountId,
+    input: params.input,
+  });
+  if (completeValidationError) {
+    return completeValidationError;
+  }
+  return (
+    (await setup?.validateInputAsync?.({
+      cfg: params.cfg,
+      candidateCfg: params.candidateCfg,
+      accountId: params.accountId,
+      input: params.input,
+    })) ?? null
+  );
+}
+
 async function buildStatus(
   plugin: ChannelSetupWizardPlugin,
   wizard: ChannelSetupWizard,
@@ -77,40 +146,16 @@ function applySetupInput(params: {
   accountId: string;
   input: ChannelSetupInput;
 }) {
-  const setup = params.plugin.setup;
-  if (!setup?.applyAccountConfig) {
-    throw new Error(`${params.plugin.id} does not support setup`);
-  }
-  const resolvedAccountId =
-    setup.resolveAccountId?.({
-      cfg: params.cfg,
-      accountId: params.accountId,
-      input: params.input,
-    }) ?? params.accountId;
-  const validationError = setup.validateInput?.({
+  const candidate = resolveSetupCandidate(params);
+  const validationError = params.plugin.setup?.validateInput?.({
     cfg: params.cfg,
-    accountId: resolvedAccountId,
+    accountId: candidate.accountId,
     input: params.input,
   });
   if (validationError) {
     throw new Error(validationError);
   }
-  let next = setup.applyAccountConfig({
-    cfg: params.cfg,
-    accountId: resolvedAccountId,
-    input: params.input,
-  });
-  if (params.input.name?.trim() && setup.applyAccountName) {
-    next = setup.applyAccountName({
-      cfg: next,
-      accountId: resolvedAccountId,
-      name: params.input.name,
-    });
-  }
-  return {
-    cfg: next,
-    accountId: resolvedAccountId,
-  };
+  return candidate;
 }
 
 function collectCredentialValues(params: {
@@ -498,6 +543,35 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
       } else {
         await runCredentialSteps();
         await runTextInputSteps();
+      }
+
+      if (wizard.deferApplyUntilValidated) {
+        const deferredInput = {
+          ...credentialValues,
+          ...(Object.fromEntries(
+            wizard.textInputs?.flatMap((textInput) => {
+              const value = credentialValues[textInput.inputKey];
+              return typeof value === "string" ? [[textInput.inputKey, value]] : [];
+            }) ?? [],
+          ) as Partial<Record<keyof ChannelSetupInput, string>>),
+        };
+        const candidate = resolveSetupCandidate({
+          plugin,
+          cfg: next,
+          accountId,
+          input: deferredInput,
+        });
+        const validationError = await validateSetupCandidate({
+          plugin,
+          cfg: next,
+          candidateCfg: candidate.cfg,
+          accountId: candidate.accountId,
+          input: deferredInput,
+        });
+        if (validationError) {
+          throw new Error(validationError);
+        }
+        next = candidate.cfg;
       }
 
       if (wizard.groupAccess) {
