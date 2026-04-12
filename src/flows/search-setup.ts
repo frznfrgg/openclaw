@@ -117,14 +117,15 @@ function providerNeedsCredential(
   return entry.requiresCredential !== false;
 }
 
-function providerIsReady(
-  config: OpenClawConfig,
-  entry: Pick<PluginWebSearchProviderEntry, "id" | "envVars" | "requiresCredential">,
-): boolean {
-  if (!providerNeedsCredential(entry)) {
+function providerIsReadyFromInputs(params: {
+  keyConfigured: boolean;
+  envAvailable: boolean;
+  requiresCredential: boolean | undefined;
+}): boolean {
+  if (params.requiresCredential === false) {
     return true;
   }
-  return hasExistingKey(config, entry.id) || hasKeyInEnv(entry);
+  return params.keyConfigured || params.envAvailable;
 }
 
 function rawKeyValue(config: OpenClawConfig, provider: SearchProvider): unknown {
@@ -155,12 +156,21 @@ function buildSearchEnvRef(config: OpenClawConfig, provider: SearchProvider): Se
     resolveSearchProviderEntry(config, provider) ??
     listSearchProviderOptions(config).find((candidate) => candidate.id === provider) ??
     listSearchProviderOptions().find((candidate) => candidate.id === provider);
+  if (!entry) {
+    throw new Error(`Unknown search provider "${provider}" in secret-input-mode=ref.`);
+  }
+  return buildSearchEnvRefForEntry(entry);
+}
+
+function buildSearchEnvRefForEntry(
+  entry: Pick<PluginWebSearchProviderEntry, "envVars" | "id" | "credentialPath">,
+): SecretRef {
   const resolvedEnvVar =
     entry?.envVars.find((k) => Boolean(normalizeOptionalString(process.env[k]))) ??
     entry?.envVars[0];
   if (!resolvedEnvVar) {
     throw new Error(
-      `No env var mapping for search provider "${provider}" at ${entry?.credentialPath ?? "unknown path"} in secret-input-mode=ref.`,
+      `No env var mapping for search provider "${entry.id}" at ${entry.credentialPath ?? "unknown path"} in secret-input-mode=ref.`,
     );
   }
   return { source: "env", provider: DEFAULT_SECRET_PROVIDER_ALIAS, id: resolvedEnvVar };
@@ -188,7 +198,19 @@ export function applySearchKey(
   if (!providerEntry) {
     return config;
   }
-  const search: MutableSearchConfig = { ...config.tools?.web?.search, provider, enabled: true };
+  return applySearchKeyWithEntry(config, providerEntry, key);
+}
+
+function applySearchKeyWithEntry(
+  config: OpenClawConfig,
+  providerEntry: PluginWebSearchProviderEntry,
+  key: SecretInput,
+): OpenClawConfig {
+  const search: MutableSearchConfig = {
+    ...config.tools?.web?.search,
+    provider: providerEntry.id,
+    enabled: true,
+  };
   if (!providerEntry.setConfiguredCredentialValue) {
     providerEntry.setCredentialValue(search, key);
   }
@@ -225,9 +247,16 @@ export function applySearchProviderSelection(
   if (!providerEntry) {
     return config;
   }
+  return applySearchProviderSelectionWithEntry(config, providerEntry);
+}
+
+function applySearchProviderSelectionWithEntry(
+  config: OpenClawConfig,
+  providerEntry: PluginWebSearchProviderEntry,
+): OpenClawConfig {
   const search: MutableSearchConfig = {
     ...config.tools?.web?.search,
-    provider,
+    provider: providerEntry.id,
     enabled: true,
   };
   const nextBase: OpenClawConfig = {
@@ -334,7 +363,9 @@ export async function runSearchSetupFlow(
   prompter: WizardPrompter,
   opts?: SetupSearchOptions,
 ): Promise<OpenClawConfig> {
+  const providerLoadProgress = prompter.progress("Loading search providers...");
   const providerOptions = resolveSearchProviderOptions(config);
+  providerLoadProgress.stop();
   if (providerOptions.length === 0) {
     await prompter.note(
       [
@@ -346,6 +377,20 @@ export async function runSearchSetupFlow(
     );
     return config;
   }
+
+  const providerOptionsById = new Map(providerOptions.map((entry) => [entry.id, entry]));
+  const resolveLoadedProviderEntry = (
+    provider: SearchProvider,
+  ): PluginWebSearchProviderEntry | undefined => providerOptionsById.get(provider);
+  const readConfiguredValue = (entry: PluginWebSearchProviderEntry): unknown =>
+    entry.getConfiguredCredentialValue?.(config) ??
+    (entry.id === "brave"
+      ? entry.getCredentialValue(config.tools?.web?.search as Record<string, unknown> | undefined)
+      : undefined);
+  const readExistingKey = (entry: PluginWebSearchProviderEntry): string | undefined =>
+    normalizeSecretInputString(readConfiguredValue(entry));
+  const hasConfiguredKey = (entry: PluginWebSearchProviderEntry): boolean =>
+    hasConfiguredSecretInput(readConfiguredValue(entry));
 
   await prompter.note(
     [
@@ -359,10 +404,16 @@ export async function runSearchSetupFlow(
   const existingProvider = config.tools?.web?.search?.provider;
 
   const options = providerOptions.map((entry) => {
+    const envAvailable = hasKeyInEnv(entry);
+    const keyConfigured = hasConfiguredKey(entry);
     const hint =
       entry.requiresCredential === false
         ? `${entry.hint} · key-free`
-        : providerIsReady(config, entry)
+        : providerIsReadyFromInputs({
+              keyConfigured,
+              envAvailable,
+              requiresCredential: entry.requiresCredential,
+            })
           ? `${entry.hint} · configured`
           : entry.hint;
     return { value: entry.id, label: entry.label, hint };
@@ -372,7 +423,13 @@ export async function runSearchSetupFlow(
     if (existingProvider && providerOptions.some((entry) => entry.id === existingProvider)) {
       return existingProvider;
     }
-    const detected = providerOptions.find((entry) => providerIsReady(config, entry));
+    const detected = providerOptions.find((entry) =>
+      providerIsReadyFromInputs({
+        keyConfigured: hasConfiguredKey(entry),
+        envAvailable: hasKeyInEnv(entry),
+        requiresCredential: entry.requiresCredential,
+      }),
+    );
     if (detected) {
       return detected.id;
     }
@@ -396,21 +453,20 @@ export async function runSearchSetupFlow(
     return config;
   }
 
-  const entry =
-    resolveSearchProviderEntry(config, choice) ?? providerOptions.find((e) => e.id === choice);
+  const entry = resolveLoadedProviderEntry(choice) ?? providerOptions.find((e) => e.id === choice);
   if (!entry) {
     return config;
   }
   const credentialLabel = resolveSearchProviderCredentialLabel(entry);
-  const existingKey = resolveExistingKey(config, choice);
-  const keyConfigured = hasExistingKey(config, choice);
+  const existingKey = readExistingKey(entry);
+  const keyConfigured = hasConfiguredKey(entry);
   const envAvailable = hasKeyInEnv(entry);
   const needsCredential = providerNeedsCredential(entry);
 
   if (opts?.quickstartDefaults && (keyConfigured || envAvailable)) {
     const result = existingKey
-      ? applySearchKey(config, choice, existingKey)
-      : applySearchProviderSelection(config, choice);
+      ? applySearchKeyWithEntry(config, entry, existingKey)
+      : applySearchProviderSelectionWithEntry(config, entry);
     return await finalizeSearchProviderSetup({
       originalConfig: config,
       nextConfig: result,
@@ -432,7 +488,7 @@ export async function runSearchSetupFlow(
     );
     return await finalizeSearchProviderSetup({
       originalConfig: config,
-      nextConfig: applySearchProviderSelection(config, choice),
+      nextConfig: applySearchProviderSelectionWithEntry(config, entry),
       entry,
       runtime,
       prompter,
@@ -445,14 +501,14 @@ export async function runSearchSetupFlow(
     if (keyConfigured) {
       return await finalizeSearchProviderSetup({
         originalConfig: config,
-        nextConfig: applySearchProviderSelection(config, choice),
+        nextConfig: applySearchProviderSelectionWithEntry(config, entry),
         entry,
         runtime,
         prompter,
         opts,
       });
     }
-    const ref = buildSearchEnvRef(config, choice);
+    const ref = buildSearchEnvRefForEntry(entry);
     await prompter.note(
       [
         "Secret references enabled — OpenClaw will store a reference instead of the API key.",
@@ -464,7 +520,7 @@ export async function runSearchSetupFlow(
     );
     return await finalizeSearchProviderSetup({
       originalConfig: config,
-      nextConfig: applySearchKey(config, choice, ref),
+      nextConfig: applySearchKeyWithEntry(config, entry, ref),
       entry,
       runtime,
       prompter,
@@ -486,7 +542,7 @@ export async function runSearchSetupFlow(
     const secretInput = resolveSearchSecretInput(config, choice, key, opts?.secretInputMode);
     return await finalizeSearchProviderSetup({
       originalConfig: config,
-      nextConfig: applySearchKey(config, choice, secretInput),
+      nextConfig: applySearchKeyWithEntry(config, entry, secretInput),
       entry,
       runtime,
       prompter,
@@ -508,7 +564,7 @@ export async function runSearchSetupFlow(
   if (keyConfigured || envAvailable) {
     return await finalizeSearchProviderSetup({
       originalConfig: config,
-      nextConfig: applySearchProviderSelection(config, choice),
+      nextConfig: applySearchProviderSelectionWithEntry(config, entry),
       entry,
       runtime,
       prompter,

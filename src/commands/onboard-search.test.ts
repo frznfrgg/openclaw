@@ -295,6 +295,16 @@ describe("setupSearch", () => {
     expect(result).toBe(cfg);
   });
 
+  it("resolves search providers once per setup run", async () => {
+    searchProviderFixture.resolvePluginWebSearchProviders.mockClear();
+
+    const cfg: OpenClawConfig = {};
+    const { prompter } = createPrompter({ selectValue: "__skip__" });
+    await setupSearch(cfg, runtime, prompter);
+
+    expect(searchProviderFixture.resolvePluginWebSearchProviders).toHaveBeenCalledTimes(1);
+  });
+
   it("sets provider and key for perplexity", async () => {
     const cfg: OpenClawConfig = {};
     const { prompter } = createPrompter({
