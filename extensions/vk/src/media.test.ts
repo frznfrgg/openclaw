@@ -105,6 +105,7 @@ describe("VK media helpers", () => {
       "file:///tmp/photo.png",
       {
         maxBytes: 50 * 1024 * 1024,
+        optimizeImages: false,
         mediaLocalRoots: ["/tmp"],
       },
     );
@@ -152,6 +153,15 @@ describe("VK media helpers", () => {
         fetcher: fetcher as typeof fetch,
       }),
     ).resolves.toBe("doc-123_55");
+
+    expect(outboundMediaMocks.loadOutboundMediaFromUrl).toHaveBeenCalledWith(
+      "https://example.com/report.pdf",
+      {
+        maxBytes: 200 * 1024 * 1024,
+        optimizeImages: false,
+        mediaLocalRoots: undefined,
+      },
+    );
   });
 
   it("classifies image media into photo uploads and everything else into documents", async () => {
@@ -229,6 +239,7 @@ describe("VK media helpers", () => {
       "https://example.com/photo.jpg",
       {
         maxBytes: 50 * 1024 * 1024,
+        optimizeImages: false,
         mediaLocalRoots: undefined,
       },
     ]);
@@ -236,9 +247,53 @@ describe("VK media helpers", () => {
       "https://example.com/report.pdf",
       {
         maxBytes: 200 * 1024 * 1024,
+        optimizeImages: true,
         mediaLocalRoots: undefined,
       },
     ]);
+  });
+
+  it("keeps unknown remote URLs on the image-sized fetch cap until type is known", async () => {
+    outboundMediaMocks.loadOutboundMediaFromUrl.mockResolvedValueOnce({
+      buffer: Buffer.from("img"),
+      contentType: "image/jpeg",
+      fileName: "signed-photo.jpg",
+      kind: "image",
+    });
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ response: { upload_url: "https://upload.vk.test/photo" } }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ server: 11, photo: "[{}]", hash: "hash-1" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ response: [{ id: 22, owner_id: -123 }] }), { status: 200 }),
+      );
+
+    await expect(
+      resolveVkAttachmentToken({
+        account: baseAccount,
+        peerId: "597545525",
+        mediaUrl: "https://cdn.example.com/file?signature=abc123",
+        cfg: baseCfg,
+        fetcher: fetcher as typeof fetch,
+      }),
+    ).resolves.toBe("photo-123_22");
+
+    expect(outboundMediaMocks.loadOutboundMediaFromUrl).toHaveBeenCalledWith(
+      "https://cdn.example.com/file?signature=abc123",
+      {
+        maxBytes: 50 * 1024 * 1024,
+        optimizeImages: false,
+        mediaLocalRoots: undefined,
+      },
+    );
   });
 
   it("drops unsupported-only outbound payloads and preserves text when supported media remain", () => {

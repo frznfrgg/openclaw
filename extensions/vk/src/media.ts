@@ -221,12 +221,25 @@ async function uploadVkMultipart(params: {
 async function loadVkOutboundMedia(params: {
   mediaUrl: string;
   maxBytes: number;
+  optimizeImages?: boolean;
   mediaLocalRoots?: readonly string[];
 }): Promise<VkLoadedOutboundMedia> {
   return await loadOutboundMediaFromUrl(params.mediaUrl, {
     maxBytes: params.maxBytes,
+    optimizeImages: params.optimizeImages,
     mediaLocalRoots: params.mediaLocalRoots,
   });
+}
+
+function isKnownVkDocumentCandidate(mediaUrl: string): boolean {
+  const extension = resolveFileExtension(mediaUrl);
+  if (!extension) {
+    return false;
+  }
+  if (VK_IMAGE_EXTENSIONS.has(extension)) {
+    return false;
+  }
+  return !isBlockedVkDocument({ mediaUrl }).blocked;
 }
 
 function resolveVkOutboundMediaMaxBytes(params: {
@@ -241,7 +254,34 @@ function resolveVkOutboundMediaMaxBytes(params: {
   ) {
     return VK_IMAGE_MAX_BYTES;
   }
-  return VK_DOCUMENT_MAX_BYTES;
+  if (isKnownVkDocumentCandidate(params.mediaUrl)) {
+    return VK_DOCUMENT_MAX_BYTES;
+  }
+  return VK_IMAGE_MAX_BYTES;
+}
+
+function shouldOptimizeVkOutboundImage(params: { mediaUrl: string; maxBytes: number }): boolean {
+  if (params.maxBytes <= VK_IMAGE_MAX_BYTES) {
+    return false;
+  }
+  return !isSupportedVkImage({ mediaUrl: params.mediaUrl });
+}
+
+function resolveVkOutboundMediaLoadOptions(params: {
+  mediaUrl: string;
+  preferImageLimit?: boolean;
+}): {
+  maxBytes: number;
+  optimizeImages: boolean;
+} {
+  const maxBytes = resolveVkOutboundMediaMaxBytes(params);
+  return {
+    maxBytes,
+    optimizeImages: shouldOptimizeVkOutboundImage({
+      mediaUrl: params.mediaUrl,
+      maxBytes,
+    }),
+  };
 }
 
 async function uploadVkImageInternal(params: {
@@ -258,7 +298,7 @@ async function uploadVkImageInternal(params: {
     params.loaded ??
     (await loadVkOutboundMedia({
       mediaUrl: params.mediaUrl,
-      maxBytes: resolveVkOutboundMediaMaxBytes({
+      ...resolveVkOutboundMediaLoadOptions({
         mediaUrl: params.mediaUrl,
         preferImageLimit: true,
       }),
@@ -341,6 +381,7 @@ async function uploadVkDocumentInternal(params: {
     (await loadVkOutboundMedia({
       mediaUrl: params.mediaUrl,
       maxBytes: VK_DOCUMENT_MAX_BYTES,
+      optimizeImages: false,
       mediaLocalRoots: params.mediaLocalRoots,
     }));
   const blocked = isBlockedVkDocument({
@@ -479,7 +520,7 @@ export async function resolveVkAttachmentToken(params: {
 }): Promise<string> {
   const loaded = await loadVkOutboundMedia({
     mediaUrl: params.mediaUrl,
-    maxBytes: resolveVkOutboundMediaMaxBytes({
+    ...resolveVkOutboundMediaLoadOptions({
       mediaUrl: params.mediaUrl,
     }),
     mediaLocalRoots: params.mediaLocalRoots,

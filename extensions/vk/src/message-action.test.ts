@@ -97,6 +97,7 @@ describe("VK message action sends attachments", () => {
       expect(fetcher).toHaveBeenCalledTimes(4);
       expect(outboundMediaMocks.loadOutboundMediaFromUrl).toHaveBeenCalledWith(pdfPath, {
         maxBytes: 200 * 1024 * 1024,
+        optimizeImages: true,
         mediaLocalRoots: [path.join(sandboxDir, "workspace")],
       });
     } finally {

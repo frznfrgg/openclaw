@@ -6,6 +6,7 @@ export type OutboundMediaLoadOptions = {
   mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
+  optimizeImages?: boolean;
 };
 
 /** Load outbound media from a remote URL or approved local path using the shared web-media policy. */
@@ -20,6 +21,7 @@ export async function loadOutboundMediaFromUrl(
       mediaAccess: options.mediaAccess,
       mediaLocalRoots: options.mediaLocalRoots,
       mediaReadFile: options.mediaReadFile,
+      optimizeImages: options.optimizeImages,
     }),
   );
 }

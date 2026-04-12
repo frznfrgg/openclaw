@@ -39,6 +39,24 @@ describe("loadOutboundMediaFromUrl", () => {
     });
   });
 
+  it("forwards optimizeImages to loadWebMedia", async () => {
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: Buffer.from("x"),
+      kind: "image",
+      contentType: "image/png",
+    });
+
+    await loadOutboundMediaFromUrl("https://example.com/image.png", {
+      maxBytes: 1024,
+      optimizeImages: false,
+    });
+
+    expect(loadWebMediaMock).toHaveBeenCalledWith("https://example.com/image.png", {
+      maxBytes: 1024,
+      optimizeImages: false,
+    });
+  });
+
   it("keeps options optional", async () => {
     loadWebMediaMock.mockResolvedValueOnce({
       buffer: Buffer.from("x"),
