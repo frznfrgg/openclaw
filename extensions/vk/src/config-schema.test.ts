@@ -18,11 +18,6 @@ describe("VkConfigSchema", () => {
     const parsed = VkConfigSchema.parse({
       enabled: true,
       communityId: " 000123 ",
-      communityAccessToken: {
-        source: "env",
-        provider: "default",
-        id: "VK_COMMUNITY_ACCESS_TOKEN",
-      },
       tokenFile: " /tmp/vk.token ",
       defaultTo: " VK:USER:000456 ",
       dmPolicy: "open",
@@ -42,6 +37,19 @@ describe("VkConfigSchema", () => {
     expect(parsed.groups).toEqual({
       "2000000015": { enabled: true },
     });
+  });
+
+  it("rejects multiple credential sources", () => {
+    const result = VkConfigSchema.safeParse({
+      communityId: "123",
+      communityAccessToken: "token",
+      tokenFile: "/tmp/vk.token",
+    });
+
+    expect(result.success).toBe(false);
+    expect(collectIssueMessages(result)).toContain(
+      "channels.vk must configure exactly one credential source: communityAccessToken or tokenFile.",
+    );
   });
 
   it("rejects invalid communityId", () => {

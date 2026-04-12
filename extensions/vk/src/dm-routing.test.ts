@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { rememberVkPendingApproval, resetVkApprovalStateForTests } from "./approval-native.js";
 import { setVkRuntime } from "./runtime.js";
 
 const mocks = vi.hoisted(() => ({
@@ -82,6 +83,7 @@ function installRuntime(params?: { storeAllowFrom?: string[] }) {
 describe("routeVkInboundEvent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetVkApprovalStateForTests();
     installRuntime();
     mocks.dispatchInboundReplyWithBase.mockResolvedValue(undefined);
     mocks.materializeVkInboundMedia.mockResolvedValue({});
@@ -247,6 +249,102 @@ describe("routeVkInboundEvent", () => {
       ],
       MediaTypes: ["application/pdf", "image/png"],
     });
+  });
+
+  it("rewrites a single pending approval reply into the matching /approve command", async () => {
+    rememberVkPendingApproval({
+      accountId: "default",
+      senderId: "42",
+      approvalId: "3c274b25-d99d-46fb-9c72-6d2d3124ca33",
+    });
+
+    await routeVkInboundEvent({
+      ctx: {
+        cfg: {},
+        accountId: "default",
+        runtime: { error: vi.fn() } as never,
+        log: { debug: vi.fn(), error: vi.fn() } as never,
+      },
+      account: {
+        ...baseAccount,
+        config: {
+          ...baseAccount.config,
+          dmPolicy: "allowlist",
+          allowFrom: ["42"],
+        },
+      },
+      event: {
+        eventId: "evt-approval-1",
+        peerId: "42",
+        senderId: "42",
+        messageId: "11",
+        text: "approve once",
+        attachments: [],
+        timestamp: 1_700_000_000_000,
+        chatType: "direct",
+      },
+      statusSink: vi.fn(),
+    });
+
+    expect(mocks.dispatchInboundReplyWithBase).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchInboundReplyWithBase.mock.calls[0][0].ctxPayload).toMatchObject({
+      RawBody: "approve once",
+      CommandBody: "/approve 3c274b25-d99d-46fb-9c72-6d2d3124ca33 allow-once",
+    });
+    expect(mocks.sendVkText).not.toHaveBeenCalled();
+  });
+
+  it("asks for an approval code instead of misrouting ambiguous approval replies", async () => {
+    rememberVkPendingApproval({
+      accountId: "default",
+      senderId: "42",
+      approvalId: "3c274b25-d99d-46fb-9c72-6d2d3124ca33",
+    });
+    rememberVkPendingApproval({
+      accountId: "default",
+      senderId: "42",
+      approvalId: "9f1f524f-1234-4e72-aaaa-bbbbbbbbbbbb",
+    });
+
+    await routeVkInboundEvent({
+      ctx: {
+        cfg: {},
+        accountId: "default",
+        runtime: { error: vi.fn() } as never,
+        log: { debug: vi.fn(), error: vi.fn() } as never,
+      },
+      account: {
+        ...baseAccount,
+        config: {
+          ...baseAccount.config,
+          dmPolicy: "allowlist",
+          allowFrom: ["42"],
+        },
+      },
+      event: {
+        eventId: "evt-approval-2",
+        peerId: "42",
+        senderId: "42",
+        messageId: "12",
+        text: "approve once",
+        attachments: [],
+        timestamp: 1_700_000_000_000,
+        chatType: "direct",
+      },
+      statusSink: vi.fn(),
+    });
+
+    expect(mocks.dispatchInboundReplyWithBase).not.toHaveBeenCalled();
+    expect(mocks.sendVkText).toHaveBeenCalledTimes(1);
+    expect(mocks.sendVkText.mock.calls[0][0]).toMatchObject({
+      cfg: {},
+      accountId: "default",
+      to: "vk:user:42",
+    });
+    expect(mocks.sendVkText.mock.calls[0][0].text).toContain("approve once 3c274b25d99d");
+    expect(mocks.sendVkText.mock.calls[0][0].text).toContain(
+      "Pending codes: 3c274b25d99d, 9f1f524f1234.",
+    );
   });
 
   it("issues a standard pairing challenge for an unknown DM sender", async () => {

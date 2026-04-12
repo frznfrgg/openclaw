@@ -159,10 +159,13 @@ export function resolveVkRuntimeAccount(params: {
   if (!account.communityId) {
     throw new Error("VK runtime requires channels.vk.communityId.");
   }
-  if (account.tokenSource === "none") {
+  if (resolveVkCredentialSourceCount(account.config) !== 1) {
     throw new Error(
       "VK runtime requires exactly one credential source: communityAccessToken, tokenFile, or VK_COMMUNITY_ACCESS_TOKEN.",
     );
+  }
+  if (account.tokenSource === "none") {
+    throw new Error("VK runtime could not resolve the configured community access token.");
   }
   if (account.tokenStatus !== "available" || !account.token?.trim()) {
     throw new Error("VK runtime could not resolve the configured community access token.");

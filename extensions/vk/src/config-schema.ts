@@ -31,6 +31,8 @@ const VK_GROUP_ALLOW_FROM_ENTRY_ERROR =
   "channels.vk.groupAllowFrom entries must be numeric VK user ids.";
 const VK_DEFAULT_TO_ERROR =
   'channels.vk.defaultTo must be "vk:user:<user_id>" or "vk:chat:<peer_id>".';
+const VK_CREDENTIAL_SOURCE_ERROR =
+  "channels.vk must configure exactly one credential source: communityAccessToken or tokenFile.";
 
 type CanonicalVkId = { canonical: string; value: bigint };
 
@@ -297,6 +299,17 @@ export const VkConfigSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    const credentialSourceCount =
+      (value.communityAccessToken !== undefined ? 1 : 0) +
+      (typeof value.tokenFile === "string" && value.tokenFile.trim() ? 1 : 0);
+    if (credentialSourceCount !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["communityAccessToken"],
+        message: VK_CREDENTIAL_SOURCE_ERROR,
+      });
+    }
+
     const dmPolicy = value.dmPolicy ?? "pairing";
     const allowFrom = value.allowFrom ?? [];
     if (dmPolicy === "allowlist") {

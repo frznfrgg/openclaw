@@ -17,27 +17,91 @@ type PendingVkApprovalRoute = {
   approvalId: string;
   accountId: string;
   senderId: string;
+  replyToken: string;
+  expiresAtMs: number;
 };
 
-const pendingVkApprovalsBySender = new Map<string, PendingVkApprovalRoute>();
+type VkApprovalProxyReply =
+  | { kind: "miss" }
+  | { kind: "command"; command: string }
+  | { kind: "error"; message: string };
 
-function buildPendingVkApprovalKey(params: { accountId?: string | null; senderId: string }): string {
+type ParsedVkApprovalDecision = {
+  decision: VkApprovalDecision;
+  replyToken?: string;
+};
+
+const VK_APPROVAL_REPLY_TOKEN_LENGTH = 12;
+const pendingVkApprovalsBySender = new Map<string, PendingVkApprovalRoute[]>();
+
+function buildPendingVkApprovalKey(params: {
+  accountId?: string | null;
+  senderId: string;
+}): string {
   return `${params.accountId?.trim() || VK_DEFAULT_ACCOUNT_ID}:${params.senderId}`;
 }
 
-function parseVkApprovalDecision(text: string): VkApprovalDecision | null {
+function normalizeVkApprovalReplyToken(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function buildVkApprovalReplyToken(approvalId: string): string {
+  const normalized = normalizeVkApprovalReplyToken(approvalId);
+  if (!normalized) {
+    return "approval";
+  }
+  return normalized.slice(0, VK_APPROVAL_REPLY_TOKEN_LENGTH);
+}
+
+function pruneExpiredPendingVkApprovals(key: string, nowMs: number): PendingVkApprovalRoute[] {
+  const entries = pendingVkApprovalsBySender.get(key) ?? [];
+  const activeEntries = entries.filter((entry) => entry.expiresAtMs > nowMs);
+  if (activeEntries.length === 0) {
+    pendingVkApprovalsBySender.delete(key);
+    return [];
+  }
+  if (activeEntries.length !== entries.length) {
+    pendingVkApprovalsBySender.set(key, activeEntries);
+  }
+  return activeEntries;
+}
+
+function parseVkApprovalDecision(text: string): ParsedVkApprovalDecision | null {
   const normalized = text.trim().toLowerCase();
   if (!normalized) {
     return null;
   }
-  if (/^(approve|allow)(?:\s+(once|one|this))?$/.test(normalized)) {
-    return "allow-once";
+  const allowAlwaysMatch = normalized.match(
+    /^(approve|allow)\s+(always|forever)(?:\s+([a-z0-9-]+))?$/,
+  );
+  if (allowAlwaysMatch) {
+    return {
+      decision: "allow-always",
+      ...(allowAlwaysMatch[3]
+        ? { replyToken: normalizeVkApprovalReplyToken(allowAlwaysMatch[3]) }
+        : {}),
+    };
   }
-  if (/^(approve|allow)\s+(always|forever)$/.test(normalized)) {
-    return "allow-always";
+  const allowOnceMatch = normalized.match(
+    /^(approve|allow)(?:\s+(once|one|this))?(?:\s+([a-z0-9-]+))?$/,
+  );
+  if (allowOnceMatch) {
+    return {
+      decision: "allow-once",
+      ...(allowOnceMatch[3]
+        ? { replyToken: normalizeVkApprovalReplyToken(allowOnceMatch[3]) }
+        : {}),
+    };
   }
-  if (/^(deny|reject|block|cancel|no)$/.test(normalized)) {
-    return "deny";
+  const denyMatch = normalized.match(/^(deny|reject|block|cancel|no)(?:\s+([a-z0-9-]+))?$/);
+  if (denyMatch) {
+    return {
+      decision: "deny",
+      ...(denyMatch[2] ? { replyToken: normalizeVkApprovalReplyToken(denyMatch[2]) } : {}),
+    };
   }
   return null;
 }
@@ -46,12 +110,21 @@ export function rememberVkPendingApproval(params: {
   accountId?: string | null;
   senderId: string;
   approvalId: string;
+  expiresAtMs?: number;
 }): void {
-  pendingVkApprovalsBySender.set(buildPendingVkApprovalKey(params), {
+  const key = buildPendingVkApprovalKey(params);
+  const nextEntry: PendingVkApprovalRoute = {
     approvalId: params.approvalId,
     accountId: params.accountId?.trim() || VK_DEFAULT_ACCOUNT_ID,
     senderId: params.senderId,
-  });
+    replyToken: buildVkApprovalReplyToken(params.approvalId),
+    expiresAtMs: params.expiresAtMs ?? Number.POSITIVE_INFINITY,
+  };
+  const remaining = pruneExpiredPendingVkApprovals(key, Date.now()).filter(
+    (entry) => entry.approvalId !== params.approvalId,
+  );
+  remaining.push(nextEntry);
+  pendingVkApprovalsBySender.set(key, remaining);
 }
 
 export function forgetVkPendingApproval(params: {
@@ -60,14 +133,80 @@ export function forgetVkPendingApproval(params: {
   approvalId?: string;
 }): void {
   const key = buildPendingVkApprovalKey(params);
-  const current = pendingVkApprovalsBySender.get(key);
-  if (!current) {
+  const current = pendingVkApprovalsBySender.get(key) ?? [];
+  if (current.length === 0) {
     return;
   }
-  if (params.approvalId && current.approvalId !== params.approvalId) {
+  if (!params.approvalId) {
+    pendingVkApprovalsBySender.delete(key);
     return;
   }
-  pendingVkApprovalsBySender.delete(key);
+  const remaining = current.filter((entry) => entry.approvalId !== params.approvalId);
+  if (remaining.length === 0) {
+    pendingVkApprovalsBySender.delete(key);
+    return;
+  }
+  pendingVkApprovalsBySender.set(key, remaining);
+}
+
+export function resolveVkApprovalProxyReply(params: {
+  accountId?: string | null;
+  senderId?: string | null;
+  rawBody: string;
+  nowMs?: number;
+}): VkApprovalProxyReply {
+  const senderId = params.senderId ? normalizeVkUserId(params.senderId) : undefined;
+  if (!senderId) {
+    return { kind: "miss" };
+  }
+  const parsedDecision = parseVkApprovalDecision(params.rawBody);
+  if (!parsedDecision) {
+    return { kind: "miss" };
+  }
+  const key = buildPendingVkApprovalKey({
+    accountId: params.accountId,
+    senderId,
+  });
+  const entries = pruneExpiredPendingVkApprovals(key, params.nowMs ?? Date.now());
+  if (entries.length === 0) {
+    return {
+      kind: "error",
+      message: "There are no pending approvals in this DM.",
+    };
+  }
+  if (parsedDecision.replyToken) {
+    const matchedEntry = entries.find((entry) => {
+      return (
+        entry.replyToken === parsedDecision.replyToken ||
+        normalizeVkApprovalReplyToken(entry.approvalId) === parsedDecision.replyToken
+      );
+    });
+    if (!matchedEntry) {
+      return {
+        kind: "error",
+        message:
+          `No pending approval matches code ${parsedDecision.replyToken}. ` +
+          "Reply with one of the approval codes shown in the pending request message.",
+      };
+    }
+    return {
+      kind: "command",
+      command: `/approve ${matchedEntry.approvalId} ${parsedDecision.decision}`,
+    };
+  }
+  if (entries.length === 1) {
+    return {
+      kind: "command",
+      command: `/approve ${entries[0].approvalId} ${parsedDecision.decision}`,
+    };
+  }
+  return {
+    kind: "error",
+    message:
+      "You have multiple pending approvals in this DM. " +
+      `Reply with the approval code shown in the request, for example: approve once ${entries[0].replyToken}. ` +
+      `Pending codes: ${entries.map((entry) => entry.replyToken).join(", ")}.`,
+  };
 }
 
 export function resolveVkApprovalProxyCommand(params: {
@@ -75,27 +214,12 @@ export function resolveVkApprovalProxyCommand(params: {
   senderId?: string | null;
   rawBody: string;
 }): string | null {
-  const senderId = params.senderId ? normalizeVkUserId(params.senderId) : undefined;
-  if (!senderId) {
-    return null;
-  }
-  const decision = parseVkApprovalDecision(params.rawBody);
-  if (!decision) {
-    return null;
-  }
-  const entry = pendingVkApprovalsBySender.get(
-    buildPendingVkApprovalKey({
-      accountId: params.accountId,
-      senderId,
-    }),
-  );
-  if (!entry) {
-    return null;
-  }
-  return `/approve ${entry.approvalId} ${decision}`;
+  const resolved = resolveVkApprovalProxyReply(params);
+  return resolved.kind === "command" ? resolved.command : null;
 }
 
 export function buildVkApprovalPendingText(params: {
+  approvalId: string;
   view: {
     approvalKind: "exec" | "plugin";
     title: string;
@@ -109,6 +233,7 @@ export function buildVkApprovalPendingText(params: {
   nowMs: number;
 }): string {
   const lines: string[] = [];
+  const replyToken = buildVkApprovalReplyToken(params.approvalId);
   lines.push(params.view.title);
   if (params.view.description?.trim()) {
     lines.push(params.view.description.trim());
@@ -132,21 +257,25 @@ export function buildVkApprovalPendingText(params: {
     lines.push(commandText);
     lines.push("```");
   }
-  const actions = params.view.actions
-    .map((action) => action.decision)
-    .filter((decision): decision is VkApprovalDecision => {
-      return decision === "allow-once" || decision === "allow-always" || decision === "deny";
-    });
+  lines.push("");
+  lines.push(`Approval code: ${replyToken}`);
+  const actions = new Set(
+    params.view.actions
+      .map((action) => action.decision)
+      .filter((decision): decision is VkApprovalDecision => {
+        return decision === "allow-once" || decision === "allow-always" || decision === "deny";
+      }),
+  );
   lines.push("");
   lines.push("Reply in this DM with one of:");
-  if (actions.includes("allow-once")) {
-    lines.push("approve once");
+  if (actions.has("allow-once")) {
+    lines.push(`approve once ${replyToken}`);
   }
-  if (actions.includes("allow-always")) {
-    lines.push("approve always");
+  if (actions.has("allow-always")) {
+    lines.push(`approve always ${replyToken}`);
   }
-  if (actions.includes("deny")) {
-    lines.push("deny");
+  if (actions.has("deny")) {
+    lines.push(`deny ${replyToken}`);
   }
   const expiresInMs = Math.max(0, params.view.expiresAtMs - params.nowMs);
   const expiresInMin = Math.ceil(expiresInMs / 60_000);

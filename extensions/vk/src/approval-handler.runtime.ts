@@ -1,28 +1,45 @@
 import type { PendingApprovalView } from "openclaw/plugin-sdk/approval-handler-runtime";
 import { createChannelApprovalNativeRuntimeAdapter } from "openclaw/plugin-sdk/approval-handler-runtime";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
-import { rememberVkPendingApproval, buildVkApprovalPendingText } from "./approval-native.js";
+import {
+  buildVkApprovalPendingText,
+  forgetVkPendingApproval,
+  rememberVkPendingApproval,
+} from "./approval-native.js";
 import { sendVkText } from "./send.js";
 import { VK_DEFAULT_ACCOUNT_ID } from "./shared.js";
 import { parseVkExplicitTarget } from "./targets.js";
 
 const log = createSubsystemLogger("vk/approvals");
 
+type VkPendingApprovalEntry = {
+  messageId: string;
+  accountId: string;
+  senderId: string;
+  approvalId: string;
+};
+
 function resolveVkApprovalRecipient(target: string): string | null {
   const parsed = parseVkExplicitTarget(target);
-  return parsed?.kind === "user" ? parsed.userId : null;
+  return parsed?.kind === "user" ? parsed.userId ?? null : null;
 }
 
-export const vkApprovalNativeRuntime = createChannelApprovalNativeRuntimeAdapter<string, string, string>({
+export const vkApprovalNativeRuntime = createChannelApprovalNativeRuntimeAdapter<
+  string,
+  string,
+  VkPendingApprovalEntry,
+  VkPendingApprovalEntry
+>({
   eventKinds: ["exec", "plugin"],
   availability: {
     isConfigured: () => true,
     shouldHandle: () => true,
   },
   presentation: {
-    buildPendingPayload: ({ view, nowMs }) =>
+    buildPendingPayload: ({ request, view, nowMs }) =>
       buildVkApprovalPendingText({
-        view: view as PendingApprovalView,
+        approvalId: request.id,
+        view: view,
         nowMs,
       }),
     buildResolvedResult: () => ({ kind: "leave" }),
@@ -33,7 +50,7 @@ export const vkApprovalNativeRuntime = createChannelApprovalNativeRuntimeAdapter
       dedupeKey: plannedTarget.target.to,
       target: plannedTarget.target.to,
     }),
-    deliverPending: async ({ cfg, accountId, preparedTarget, request, pendingPayload }) => {
+    deliverPending: async ({ cfg, accountId, preparedTarget, request, pendingPayload, view }) => {
       const result = await sendVkText({
         cfg,
         accountId: accountId ?? VK_DEFAULT_ACCOUNT_ID,
@@ -41,14 +58,35 @@ export const vkApprovalNativeRuntime = createChannelApprovalNativeRuntimeAdapter
         text: pendingPayload,
       });
       const recipient = resolveVkApprovalRecipient(preparedTarget);
-      if (recipient) {
-        rememberVkPendingApproval({
-          accountId: accountId ?? VK_DEFAULT_ACCOUNT_ID,
-          senderId: recipient,
-          approvalId: request.id,
-        });
+      if (!recipient) {
+        return null;
       }
-      return result.messageId;
+      const entry: VkPendingApprovalEntry = {
+        messageId: result.messageId,
+        accountId: accountId ?? VK_DEFAULT_ACCOUNT_ID,
+        senderId: recipient,
+        approvalId: request.id,
+      };
+      rememberVkPendingApproval({
+        accountId: entry.accountId,
+        senderId: entry.senderId,
+        approvalId: entry.approvalId,
+        expiresAtMs: view.expiresAtMs,
+      });
+      return entry;
+    },
+  },
+  interactions: {
+    bindPending: ({ entry }) => entry,
+    unbindPending: ({ binding }) => {
+      if (!binding) {
+        return;
+      }
+      forgetVkPendingApproval({
+        accountId: binding.accountId,
+        senderId: binding.senderId,
+        approvalId: binding.approvalId,
+      });
     },
   },
   observe: {

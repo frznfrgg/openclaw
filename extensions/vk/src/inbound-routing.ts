@@ -15,7 +15,7 @@ import {
   resolveOpenProviderRuntimeGroupPolicy,
 } from "openclaw/plugin-sdk/config-runtime";
 import { dispatchInboundReplyWithBase } from "openclaw/plugin-sdk/inbound-reply-dispatch";
-import { resolveVkApprovalProxyCommand } from "./approval-native.js";
+import { resolveVkApprovalProxyReply } from "./approval-native.js";
 import { materializeVkInboundMedia } from "./inbound-media.js";
 import type { VkInboundEvent } from "./inbound-normalize.js";
 import { getVkRuntime } from "./runtime.js";
@@ -186,14 +186,30 @@ async function dispatchVkInboundConversation(params: {
     event.chatType === "group" && wasMentioned
       ? stripVkSelfMentions(event.text, account.communityId)
       : event.text.trim();
-  const commandBody =
-    (event.chatType === "direct"
-      ? resolveVkApprovalProxyCommand({
+  const originatingTarget = resolveVkOriginatingTarget(event);
+  const approvalProxy =
+    event.chatType === "direct"
+      ? resolveVkApprovalProxyReply({
           accountId: account.accountId,
           senderId: event.senderId,
           rawBody,
         })
-      : null) ?? resolveVkCommandBody(rawBody);
+      : { kind: "miss" as const };
+  if (approvalProxy.kind === "error") {
+    await sendVkText({
+      cfg: ctx.cfg,
+      accountId: account.accountId,
+      to: originatingTarget,
+      text: approvalProxy.message,
+    });
+    statusSink({
+      lastOutboundAt: Date.now(),
+    });
+    return;
+  }
+  const commandBody =
+    (approvalProxy.kind === "command" ? approvalProxy.command : null) ??
+    resolveVkCommandBody(rawBody);
   const body = core.channel.reply.formatAgentEnvelope({
     channel: "VK",
     from: `user ${event.senderId}`,
@@ -202,7 +218,6 @@ async function dispatchVkInboundConversation(params: {
     envelope: envelopeOptions,
     body: rawBody,
   });
-  const originatingTarget = resolveVkOriginatingTarget(event);
   const ctxPayload = core.channel.reply.finalizeInboundContext({
     Body: body,
     RawBody: rawBody,
