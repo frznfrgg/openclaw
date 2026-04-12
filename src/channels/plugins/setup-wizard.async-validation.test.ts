@@ -77,11 +77,7 @@ const baseCfg: OpenClawConfig = {};
 describe("buildChannelSetupWizardAdapterFromSetupWizard", () => {
   it("validates the fully assembled candidate config before returning", async () => {
     const validateCompleteInput = vi.fn(({ cfg, candidateCfg, accountId, input }) => {
-      expect(cfg.channels?.vk).toMatchObject({
-        enabled: true,
-        communityId: "123",
-        communityAccessToken: "vk-token",
-      });
+      expect(cfg.channels?.vk).toBeUndefined();
       expect(accountId).toBe("default");
       expect(input).toMatchObject({
         communityId: "123",
@@ -104,6 +100,7 @@ describe("buildChannelSetupWizardAdapterFromSetupWizard", () => {
       wizard: {
         channel: "vk",
         deferApplyUntilValidated: true,
+        stepOrder: "text-first",
         status: {
           configuredLabel: "Configured",
           unconfiguredLabel: "Not configured",
@@ -158,6 +155,7 @@ describe("buildChannelSetupWizardAdapterFromSetupWizard", () => {
       wizard: {
         channel: "vk",
         deferApplyUntilValidated: true,
+        stepOrder: "text-first",
         status: {
           configuredLabel: "Configured",
           unconfiguredLabel: "Not configured",
@@ -251,6 +249,61 @@ describe("buildChannelSetupWizardAdapterFromSetupWizard", () => {
     expect(result.cfg.channels?.bluebubbles).toMatchObject({
       enabled: true,
       service: "auto",
+    });
+  });
+
+  it("honors credential secretInputMode during deferred setup", async () => {
+    const plugin = createVkSetupTestPlugin({
+      validateInputAsync: vi.fn(async () => null),
+    });
+    const adapter = buildChannelSetupWizardAdapterFromSetupWizard({
+      plugin,
+      wizard: {
+        channel: "vk",
+        deferApplyUntilValidated: true,
+        stepOrder: "text-first",
+        status: {
+          configuredLabel: "Configured",
+          unconfiguredLabel: "Not configured",
+          resolveConfigured: () => false,
+        },
+        credentials: [
+          {
+            inputKey: "token",
+            providerHint: "vk",
+            credentialLabel: "VK community access token",
+            secretInputMode: "plaintext",
+            envPrompt: "Use VK token from env?",
+            keepPrompt: "Keep current VK token?",
+            inputPrompt: "Enter VK token",
+            inspect: () => ({
+              accountConfigured: false,
+              hasConfiguredValue: false,
+            }),
+          },
+        ],
+        textInputs: [
+          {
+            inputKey: "communityId",
+            message: "Community ID",
+          },
+        ],
+      },
+    });
+
+    const result = await adapter.configure({
+      cfg: baseCfg,
+      runtime: {} as never,
+      prompter: createPrompter(["123", "vk-token"]),
+      accountOverrides: {},
+      shouldPromptAccountIds: false,
+      forceAllowFrom: false,
+    });
+
+    expect(result.cfg.channels?.vk).toMatchObject({
+      enabled: true,
+      communityId: "123",
+      communityAccessToken: "vk-token",
     });
   });
 });

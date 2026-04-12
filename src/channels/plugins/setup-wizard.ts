@@ -36,64 +36,6 @@ export type {
 
 type ChannelSetupWizardPlugin = ChannelSetupPlugin;
 
-function parseDeferredBoolean(value: string): boolean | undefined {
-  const normalized = normalizeOptionalString(value)?.toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
-    return true;
-  }
-  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
-    return false;
-  }
-  return undefined;
-}
-
-function coerceDeferredSetupInput(
-  values: Partial<Record<keyof ChannelSetupInput, string>>,
-): ChannelSetupInput {
-  const input: ChannelSetupInput = {};
-  for (const [rawKey, rawValue] of Object.entries(values)) {
-    if (typeof rawValue !== "string") {
-      continue;
-    }
-    const key = rawKey as keyof ChannelSetupInput;
-    switch (key) {
-      case "service":
-        if (rawValue === "auto" || rawValue === "imessage" || rawValue === "sms") {
-          input.service = rawValue;
-        }
-        break;
-      case "useEnv":
-      case "dangerouslyAllowPrivateNetwork":
-      case "allowPrivateNetwork":
-      case "autoDiscoverChannels": {
-        const parsed = parseDeferredBoolean(rawValue);
-        if (parsed !== undefined) {
-          input[key] = parsed;
-        }
-        break;
-      }
-      case "initialSyncLimit": {
-        const parsed = Number(rawValue);
-        if (Number.isFinite(parsed)) {
-          input.initialSyncLimit = parsed;
-        }
-        break;
-      }
-      case "groupChannels":
-      case "dmAllowlist":
-        input[key] = splitSetupEntries(rawValue);
-        break;
-      default:
-        (input as Record<string, unknown>)[key] = rawValue;
-        break;
-    }
-  }
-  return input;
-}
-
 function resolveSetupCandidate(params: {
   plugin: ChannelSetupWizardPlugin;
   cfg: OpenClawConfig;
@@ -216,6 +158,11 @@ function applySetupInput(params: {
   return candidate;
 }
 
+function trimResolvedValue(value?: string): string | undefined {
+  const trimmed = normalizeOptionalString(value);
+  return trimmed ? trimmed : undefined;
+}
+
 function collectCredentialValues(params: {
   wizard: ChannelSetupWizard;
   cfg: OpenClawConfig;
@@ -223,7 +170,7 @@ function collectCredentialValues(params: {
 }): ChannelSetupWizardCredentialValues {
   const values: ChannelSetupWizardCredentialValues = {};
   for (const credential of params.wizard.credentials) {
-    const resolvedValue = normalizeOptionalString(
+    const resolvedValue = trimResolvedValue(
       credential.inspect({
         cfg: params.cfg,
         accountId: params.accountId,
@@ -307,12 +254,20 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
           }));
 
       let next = cfg;
+      let draftInput: ChannelSetupInput = {};
+      let draftAccountId = accountId;
       let credentialValues = collectCredentialValues({
         wizard,
         cfg: next,
         accountId,
       });
       let usedEnvShortcut = false;
+      const recordDraftInput = (patch: Partial<ChannelSetupInput>) => {
+        draftInput = {
+          ...draftInput,
+          ...patch,
+        };
+      };
 
       if (wizard.envShortcut?.isAvailable({ cfg: next, accountId })) {
         const useEnvShortcut = await prompter.confirm({
@@ -326,6 +281,7 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
             cfg: next,
             accountId,
           });
+          recordDraftInput({ useEnv: true });
           usedEnvShortcut = true;
         }
       }
@@ -369,7 +325,7 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
         }
         for (const credential of wizard.credentials) {
           let credentialState = credential.inspect({ cfg: next, accountId });
-          let resolvedCredentialValue = normalizeOptionalString(credentialState.resolvedValue);
+          let resolvedCredentialValue = trimResolvedValue(credentialState.resolvedValue);
           const shouldPrompt = credential.shouldPrompt
             ? await credential.shouldPrompt({
                 cfg: next,
@@ -394,7 +350,7 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
             prompter,
             providerHint: credential.providerHint,
             credentialLabel: credential.credentialLabel,
-            secretInputMode: options?.secretInputMode,
+            secretInputMode: credential.secretInputMode ?? options?.secretInputMode,
             accountConfigured: credentialState.accountConfigured,
             hasConfigToken: credentialState.hasConfiguredValue,
             allowEnv,
@@ -412,8 +368,12 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
                     );
                   }
                 : undefined,
-            applyUseEnv: async (currentCfg) =>
-              credential.applyUseEnv
+            applyUseEnv: async (currentCfg) => {
+              recordDraftInput({
+                [credential.inputKey]: undefined,
+                useEnv: true,
+              });
+              return credential.applyUseEnv
                 ? await credential.applyUseEnv({
                     cfg: currentCfg,
                     accountId,
@@ -426,9 +386,14 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
                       [credential.inputKey]: undefined,
                       useEnv: true,
                     },
-                  }).cfg,
+                  }).cfg;
+            },
             applySet: async (currentCfg, value, resolvedValue) => {
               resolvedCredentialValue = resolvedValue;
+              recordDraftInput({
+                [credential.inputKey]: value as ChannelSetupInput[keyof ChannelSetupInput],
+                useEnv: false,
+              });
               return credential.applySet
                 ? await credential.applySet({
                     cfg: currentCfg,
@@ -452,8 +417,8 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
           next = credentialResult.cfg;
           credentialState = credential.inspect({ cfg: next, accountId });
           resolvedCredentialValue =
-            normalizeOptionalString(credentialResult.resolvedValue) ||
-            normalizeOptionalString(credentialState.resolvedValue);
+            trimResolvedValue(credentialResult.resolvedValue) ||
+            trimResolvedValue(credentialState.resolvedValue);
           if (resolvedCredentialValue) {
             credentialValues[credential.inputKey] = resolvedCredentialValue;
           } else {
@@ -464,13 +429,13 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
 
       const runTextInputSteps = async () => {
         for (const textInput of wizard.textInputs ?? []) {
-          let currentValue = normalizeOptionalString(
+          let currentValue = trimResolvedValue(
             typeof credentialValues[textInput.inputKey] === "string"
               ? credentialValues[textInput.inputKey]
               : undefined,
           );
           if (!currentValue && textInput.currentValue) {
-            currentValue = normalizeOptionalString(
+            currentValue = trimResolvedValue(
               await textInput.currentValue({
                 cfg: next,
                 accountId,
@@ -491,6 +456,9 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
             if (currentValue) {
               credentialValues[textInput.inputKey] = currentValue;
               if (textInput.applyCurrentValue) {
+                recordDraftInput({
+                  [textInput.inputKey]: currentValue as ChannelSetupInput[keyof ChannelSetupInput],
+                });
                 next = await applyWizardTextInputValue({
                   plugin,
                   input: textInput,
@@ -534,7 +502,7 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
             }
           }
 
-          const initialValue = normalizeOptionalString(
+          const initialValue = trimResolvedValue(
             (await textInput.initialValue?.({
               cfg: next,
               accountId,
@@ -561,6 +529,9 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
           const trimmedValue = rawValue.trim();
           if (!trimmedValue && textInput.required === false) {
             if (textInput.applyEmptyValue) {
+              recordDraftInput({
+                [textInput.inputKey]: "" as ChannelSetupInput[keyof ChannelSetupInput],
+              });
               next = await applyWizardTextInputValue({
                 plugin,
                 input: textInput,
@@ -572,7 +543,7 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
             delete credentialValues[textInput.inputKey];
             continue;
           }
-          const normalizedValue = normalizeOptionalString(
+          const normalizedValue = trimResolvedValue(
             textInput.normalizeValue?.({
               value: trimmedValue,
               cfg: next,
@@ -584,6 +555,9 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
             delete credentialValues[textInput.inputKey];
             continue;
           }
+          recordDraftInput({
+            [textInput.inputKey]: normalizedValue as ChannelSetupInput[keyof ChannelSetupInput],
+          });
           next = await applyWizardTextInputValue({
             plugin,
             input: textInput,
@@ -604,32 +578,22 @@ export function buildChannelSetupWizardAdapterFromSetupWizard(params: {
       }
 
       if (wizard.deferApplyUntilValidated) {
-        const deferredInput = coerceDeferredSetupInput({
-          ...credentialValues,
-          ...(Object.fromEntries(
-            wizard.textInputs?.flatMap((textInput) => {
-              const value = credentialValues[textInput.inputKey];
-              return typeof value === "string" ? [[textInput.inputKey, value]] : [];
-            }) ?? [],
-          ) as Partial<Record<keyof ChannelSetupInput, string>>),
-        });
-        const candidate = resolveSetupCandidate({
-          plugin,
-          cfg: next,
-          accountId,
-          input: deferredInput,
-        });
+        draftAccountId =
+          plugin.setup?.resolveAccountId?.({
+            cfg,
+            accountId,
+            input: draftInput,
+          }) ?? accountId;
         const validationError = await validateSetupCandidate({
           plugin,
-          cfg: next,
-          candidateCfg: candidate.cfg,
-          accountId: candidate.accountId,
-          input: deferredInput,
+          cfg,
+          candidateCfg: next,
+          accountId: draftAccountId,
+          input: draftInput,
         });
         if (validationError) {
           throw new Error(validationError);
         }
-        next = candidate.cfg;
       }
 
       if (wizard.groupAccess) {
